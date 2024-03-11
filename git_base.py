@@ -60,8 +60,8 @@ def init(script_name, list_projects=True):
     return validation_success
 
 
-def strip_project_dir(dir):
-    return dir.replace(projects_dir + '\\', '').replace(projects_dir + '/', '').replace(projects_dir, '')
+def strip_project_dir(repo_dir):
+    return repo_dir.replace(projects_dir + '\\', '').replace(projects_dir + '/', '').replace(projects_dir, '')
 
 
 def change_dir_to_project(project, quiet=False):
@@ -299,7 +299,7 @@ def get_artifact_versions(project):
 
     if len(pom_files) < 1:
         print(f"WARN: No 'pom.xml' files found in project dir: '{project_dir}'")
-        pom_files.append(None)
+        pom_files.append('')
 
     first = True
     for pom_file_path in pom_files:
@@ -308,7 +308,7 @@ def get_artifact_versions(project):
         version_tag_text = 'N/A'
         artifact_id_text = None
 
-        if pom_file_path is not None:
+        if pom_file_path != '':
             tree = ElementTree.parse(pom_file_path)
             root = tree.getroot()
             namespaces = {'maven': 'http://maven.apache.org/POM/4.0.0'}
