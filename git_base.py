@@ -9,7 +9,16 @@ from prettytable import PrettyTable
 projects_dir = 'C:\\projects'
 
 # Run "python git_find_projects.py" to get initial list.
-projects = []
+projects = [
+]
+
+
+def is_git_installed():
+    try:
+        subprocess.check_output(["git", "--version"])
+        return True
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        return False
 
 
 def init(script_name, list_projects=True):
@@ -17,6 +26,11 @@ def init(script_name, list_projects=True):
     print(script_name)
     print('-----------------')
     validation_success = True
+
+    if not is_git_installed():
+        print(f'ERROR: "git" is not installed or accessible from command line.')
+        validation_success = False
+
     if not os.path.isdir(projects_dir):
         print(f'ERROR: Not a valid directory: projects_dir=\"{projects_dir}\"')
         validation_success = False
@@ -332,7 +346,8 @@ def get_artifact_versions(project):
         if pom_file_path is not None:
             pom_file_path = strip_project_dir(pom_file_path)
 
-        artifact_versions.append((artifact_id_text, version_tag_text, current_branch, latest_commit_date, pom_file_path))
+        artifact_versions.append(
+            (artifact_id_text, version_tag_text, current_branch, latest_commit_date, pom_file_path))
         first = False
 
     return artifact_versions
