@@ -1,6 +1,7 @@
 import os
 import re
 import subprocess
+import argparse
 from datetime import datetime
 from xml.etree import ElementTree
 
@@ -9,8 +10,7 @@ from prettytable import PrettyTable
 projects_dir = 'C:\\projects'
 
 # Run "python git_find_projects.py" to get initial list.
-projects = [
-]
+projects = []
 
 
 def is_git_installed():
@@ -25,6 +25,7 @@ def init(script_name, list_projects=True):
     print('-----------------')
     print(script_name)
     print('-----------------')
+
     validation_success = True
 
     if not is_git_installed():
@@ -114,9 +115,28 @@ def get_latest_commit_date():
 
 
 def print_version_status():
+    parser = argparse.ArgumentParser(description='Check for --poms argument.')
+
+    # Add the --outputPoms argument
+    parser.add_argument('--poms', action='store_true', help='Include to out POM file locations.')
+
+    # Parse the command line arguments
+    args = parser.parse_args()
+
+    # Set outputPoms based on the presence of --outputPoms argument
+    output_poms = args.poms
+
+    if not output_poms:
+        print('HINT: Provide "--poms" as an argument to print the POM directories. ')
+
     table = PrettyTable()
-    table.field_names = ["Artifact Id", "Version", "Branch", "Latest Commit", "POM"]
+    fields = ["Artifact Id", "Version", "Branch", "Latest Commit"]
+    if output_poms:
+        fields.append("POM")
+
+    table.field_names = fields
     table.align = "l"
+
     for project in projects:
         change_dir_to_project(project, quiet=True)
         artifact_versions = get_artifact_versions(project)
@@ -132,7 +152,11 @@ def print_version_status():
                 latest_commit_date = ''
                 current_branch = ''
 
-            table.add_row([artifact_id, artifact_version, current_branch, latest_commit_date, pom], divider=divider)
+            row = [artifact_id, artifact_version, current_branch, latest_commit_date]
+            if output_poms:
+                row.append(pom)
+
+            table.add_row(row, divider=divider)
 
     print(table)
 
