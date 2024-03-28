@@ -10,7 +10,22 @@ from prettytable import PrettyTable
 projects_dir = 'C:\\projects'
 
 # Run "python git_find_projects.py" to get initial list.
-projects = []
+projects = [
+]
+
+BASE_GIT_CMD = [
+    'git',
+    '-c', 'diff.mnemonicprefix=false',
+    '-c', 'core.quotepath=false',
+    '--no-optional-locks'
+]
+
+parser = argparse.ArgumentParser(description='Configuration parameters.')
+parser.add_argument('--poms', action='store_true', help='Include to output POM file locations.')
+parser.add_argument('--skipversion', action='store_true', help='Skip the version update step of a script.')
+args = parser.parse_args()
+output_poms = args.poms
+skipversion = args.skipversion
 
 
 def is_git_installed():
@@ -89,22 +104,11 @@ def get_current_branch():
         'rev-parse',
         '--abbrev-ref',
         'HEAD']
-    # print(' '.join(git_command))
     return subprocess.check_output(git_command).decode('utf-8').strip()
 
 
 def get_latest_commit_date():
-    git_command = [
-        'git',
-        '-c',
-        'diff.mnemonicprefix=false',
-        '-c',
-        'core.quotepath=false',
-        '--no-optional-locks',
-        'log',
-        '-1',
-        '--format=%cd',
-        '--date=local']
+    git_command = BASE_GIT_CMD + ['log', '-1', '--format=%cd', '--date=local']
     commit_date_str = subprocess.check_output(git_command).decode('utf-8').strip()
     commit_date = datetime.strptime(commit_date_str, "%a %b %d %H:%M:%S %Y")
     current_date = datetime.now()
@@ -115,20 +119,6 @@ def get_latest_commit_date():
 
 
 def print_version_status():
-    parser = argparse.ArgumentParser(description='Check for --poms argument.')
-
-    # Add the --outputPoms argument
-    parser.add_argument('--poms', action='store_true', help='Include to out POM file locations.')
-
-    # Parse the command line arguments
-    args = parser.parse_args()
-
-    # Set outputPoms based on the presence of --outputPoms argument
-    output_poms = args.poms
-
-    if not output_poms:
-        print('HINT: Provide "--poms" as an argument to print the POM directories. ')
-
     table = PrettyTable()
     fields = ["Artifact Id", "Version", "Branch", "Latest Commit"]
     if output_poms:
@@ -160,22 +150,15 @@ def print_version_status():
 
     print(table)
 
+    if not output_poms:
+        print('HINT: Provide "--poms" as an argument to print the POM directories. ')
+
 
 def fetch_branch(branch):
     try:
         print('')
         print(f"-- Fetch '{branch}'")
-        git_command = [
-            'git',
-            '-c',
-            'diff.mnemonicprefix=false',
-            '-c',
-            'core.quotepath=false',
-            '--no-optional-locks',
-            'fetch',
-            '--no-tags',
-            'origin',
-            f'{branch}:{branch}']
+        git_command = BASE_GIT_CMD + ['fetch', '--no-tags', 'origin', f'{branch}:{branch}']
         print(' '.join(git_command))
         output = subprocess.check_output(git_command).decode('utf-8').strip()
         return "fatal" not in output
@@ -185,20 +168,53 @@ def fetch_branch(branch):
         return False
 
 
+def has_no_changes_in_working_directory():
+    try:
+        print('')
+        print(f"-- Check for changes in working directory")
+
+        git_command = BASE_GIT_CMD + ['status', '--porcelain']
+        print(' '.join(git_command))
+        output = subprocess.run(git_command, stdout=subprocess.PIPE, text=True).stdout.strip()
+
+        if output:
+            print(output)
+            print("-----------------")
+            print("ERROR: Changes detected in working directory, stash or revert changes and try again.")
+            return False
+
+        return True
+
+    except Exception as e:
+        print(f"ERROR: {e}")
+        return False
+
+
+def has_no_commits_to_push(branch):
+    try:
+        print('')
+        print(f"-- Check for commits to push")
+
+        git_command = BASE_GIT_CMD + ['rev-list', '--right-only', '--count', f"origin/{branch}...{branch}"]
+        print(' '.join(git_command))
+        result = subprocess.run(git_command, stdout=subprocess.PIPE, text=True).stdout.strip()
+
+        count = int(result)
+
+        if count > 0:
+            print(f"There are {count} commits waiting to be pushed to origin/{branch}. Clean up branch and try again.")
+            return False
+
+        return True
+    except Exception as e:
+        print(f"ERROR: {e}")
+
+
 def checkout_branch(branch):
     try:
         print('')
         print(f"-- Checkout '{branch}'")
-        git_command = [
-            'git',
-            '-c',
-            'diff.mnemonicprefix=false',
-            '-c',
-            'core.quotepath=false',
-            '--no-optional-locks',
-            'checkout',
-            branch,
-            '--progress']
+        git_command = BASE_GIT_CMD + ['checkout', branch, '--progress']
         print(' '.join(git_command))
         output = subprocess.check_output(git_command).decode('utf-8').strip()
         return "fatal" not in output
@@ -212,22 +228,64 @@ def merge_source_branch_to_destination_branch(source_branch, destination_branch)
     try:
         print('')
         print(f"-- Merge '{source_branch}' to '{destination_branch}'")
-        git_command = [
-            'git',
-            '-c',
-            'diff.mnemonicprefix=false',
-            '-c',
-            'core.quotepath=false',
-            '--no-optional-locks',
-            'merge',
-            '--no-ff',
-            source_branch]
+        git_command = BASE_GIT_CMD + ['merge', '--no-ff', source_branch]
+        print(' '.join(git_command))
+        output = subprocess.check_output(git_command).decode('utf-8').strip()
+
+        return "fatal" not in output
+
+    except subprocess.CalledProcessError:
+        print(f"ERROR: Unable to merge '{source_branch}' to '{destination_branch}'")
+        print('')
+        print('-- Attempting to resolve merge conflict')
+        git_command = BASE_GIT_CMD + ['checkout', '--theirs', '.']
+        print(' '.join(git_command))
+        output = subprocess.check_output(git_command).decode('utf-8').strip()
+
+        if "fatal" in output:
+            return False
+
+        git_command = BASE_GIT_CMD + ['add', '.']
+        print(' '.join(git_command))
+        output = subprocess.check_output(git_command).decode('utf-8').strip()
+
+        if "fatal" in output:
+            return False
+
+        commit_msg = f'"Merged {source_branch} into {destination_branch} and resolved conflict with {source_branch} changes."'
+        git_command = BASE_GIT_CMD + ['commit', '-m', commit_msg]
+        print(' '.join(git_command))
+        output = subprocess.check_output(git_command).decode('utf-8').strip()
+
+        return "fatal" not in output
+
+
+def amend_commit(commit_msg):
+    try:
+        print('')
+        print(f"-- Amend commit")
+        # git -c diff.mnemonicprefix=false -c core.quotepath=false --no-optional-locks commit -q --amend -F C:\Users\jlindblom\AppData\Local\Temp\b2urjsuc.i1a
+        git_command = BASE_GIT_CMD + ['commit', '-q', '--amend', '-m', commit_msg]
         print(' '.join(git_command))
         output = subprocess.check_output(git_command).decode('utf-8').strip()
         return "fatal" not in output
 
     except subprocess.CalledProcessError:
-        print(f"ERROR: Unable to merge '{source_branch}' to '{destination_branch}'")
+        print(f"ERROR: Unable stage pom.xml")
+        return False
+
+
+def stage_all_changes():
+    try:
+        print('')
+        print(f"-- Stage all changes")
+        git_command = BASE_GIT_CMD + ['add', '.']
+        print(' '.join(git_command))
+        output = subprocess.check_output(git_command).decode('utf-8').strip()
+        return "fatal" not in output
+
+    except subprocess.CalledProcessError:
+        print(f"ERROR: Unable stage pom.xml")
         return False
 
 
@@ -255,17 +313,7 @@ def pull_branch(branch):
                 print(f"ERROR: No origin in remote for '{branch}'")
                 return False
 
-        git_command = [
-            'git',
-            '-c',
-            'diff.mnemonicprefix=false',
-            '-c',
-            'core.quotepath=false',
-            '--no-optional-locks',
-            'pull',
-            '--rebase',
-            'origin',
-            branch]
+        git_command = BASE_GIT_CMD + ['pull', '--rebase', 'origin', branch]
         print(' '.join(git_command))
         output = subprocess.check_output(git_command).decode('utf-8').strip()
         return "fatal" not in output
@@ -351,7 +399,6 @@ def get_artifact_versions(project):
 
                 if not first:
                     nested = '-> '
-                    version_tag_text = ''
                     current_branch = ''
                 else:
                     nested = ''
@@ -362,7 +409,6 @@ def get_artifact_versions(project):
             artifact_id_text = project
 
         if not first:
-            version_tag_text = ''
             current_branch = ''
         else:
             current_branch = current_branch if len(current_branch) <= 9 else current_branch[:9] + '...'
@@ -375,6 +421,110 @@ def get_artifact_versions(project):
         first = False
 
     return artifact_versions
+
+
+def update_artifact_versions(project):
+    print('')
+    print(f"-- Update artifact versions")
+    current_branch = get_current_branch()
+    project_dir = get_project_dir(project)
+    pom_files = find_pom_files(project_dir)
+
+    if not pom_files:
+        pom_files = []
+
+    if len(pom_files) < 1:
+        print(f"WARN: No 'pom.xml' files found in project dir: '{project_dir}'")
+        pom_files.append('')
+
+    if current_branch == 'dev':
+        for pom_file_path in pom_files:
+            version_tag_text = None
+
+            if pom_file_path != '':
+                tree = ElementTree.parse(pom_file_path)
+                root = tree.getroot()
+                namespaces = {'maven': 'http://maven.apache.org/POM/4.0.0'}
+                version_tag = root.find('maven:version', namespaces)
+
+                if version_tag is not None:
+                    version_tag_text = version_tag.text
+                else:
+                    version_tag = root.find('maven:parent/maven:version', namespaces)
+
+                    if version_tag is not None:
+                        version_tag_text = version_tag.text
+
+            if version_tag_text is not None:
+                pattern = version_tag_text.replace('.', '\\.')
+
+                with open(pom_file_path, 'r') as file:
+                    content = file.read()
+
+
+                def update_version(x):
+                    existing_version = x.group(0)
+                    major, minor = map(int, existing_version.split('.'))
+                    new_version = f"{major}.{minor + 1}-SNAPSHOT"
+                    print(f'Replacing version "{existing_version}" with "{new_version}"')
+                    return new_version
+
+                modified_content = re.sub(pattern, update_version, content)
+
+                with open(pom_file_path, 'w') as file:
+                    file.write(modified_content)
+
+    if current_branch == 'master':
+        for pom_file_path in pom_files:
+            print(f'Processing "{pom_file_path}"')
+            if pom_file_path != '':
+                with open(pom_file_path, 'r') as file:
+                    content = file.read()
+
+
+                def update_version(x):
+                    existing_version = x.group(0)
+                    new_version = existing_version.replace('-SNAPSHOT', '')
+                    print(f'Replacing version "{existing_version}" with "{new_version}"')
+                    return new_version
+
+
+                modified_content = re.sub(pattern, update_version, content)
+
+                with open(pom_file_path, 'w') as file:
+                    file.write(modified_content)
+
+    return True
+
+
+def get_first_artifact_version(project):
+    current_branch = get_current_branch()
+    project_dir = get_project_dir(project)
+    pom_files = find_pom_files(project_dir)
+
+    if not pom_files:
+        pom_files = []
+
+    if len(pom_files) < 1:
+        print(f"WARN: No 'pom.xml' files found in project dir: '{project_dir}'")
+        pom_files.append('')
+
+    for pom_file_path in pom_files:
+        if pom_file_path != '':
+            tree = ElementTree.parse(pom_file_path)
+            root = tree.getroot()
+            namespaces = {'maven': 'http://maven.apache.org/POM/4.0.0'}
+            version_tag = root.find('maven:version', namespaces)
+
+            if version_tag is not None:
+                return version_tag.text
+            else:
+                version_tag = root.find('maven:parent/maven:version', namespaces)
+
+                if version_tag is not None:
+                    return version_tag.text
+
+    return "N/A"
 
 
 def print_successful_and_failed(successful, failed):
