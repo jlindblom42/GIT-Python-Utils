@@ -1,17 +1,13 @@
+import argparse
 import os
 import re
 import subprocess
-import argparse
 from datetime import datetime
 from xml.etree import ElementTree
 
 from prettytable import PrettyTable
 
-projects_dir = 'C:\\projects'
-
-# Run "python git_find_projects.py" to get initial list.
-projects = [
-]
+from git_projects import projects, projects_dir
 
 BASE_GIT_CMD = [
     'git',
@@ -54,7 +50,7 @@ def init(script_name, list_projects=True):
     if list_projects:
         if not projects or len(projects) < 1:
             print(f'ERROR: No projects specified: projects=\"{projects}\"')
-            print('Run "python git_find_projects.py" to get initial list.')
+            print('Run "python git_find_projects.py" to get initial list and update "git_projects.py" with that list.')
             validation_success = False
         else:
             for project in projects:
@@ -70,7 +66,6 @@ def init(script_name, list_projects=True):
         if list_projects:
             print_version_status()
     else:
-        print('')
         print('Validation failed. Fix validation errors and try again.')
 
     return validation_success
@@ -83,7 +78,6 @@ def strip_project_dir(repo_dir):
 def change_dir_to_project(project, quiet=False):
     project_dir = get_project_dir(project)
     if not quiet:
-        print('')
         print('-----------------')
         print(project_dir)
         print('-----------------')
@@ -156,7 +150,6 @@ def print_version_status():
 
 def fetch_branch(branch):
     try:
-        print('')
         print(f"-- Fetch '{branch}'")
         git_command = BASE_GIT_CMD + ['fetch', '--no-tags', 'origin', f'{branch}:{branch}']
         print(' '.join(git_command))
@@ -170,7 +163,6 @@ def fetch_branch(branch):
 
 def has_no_changes_in_working_directory():
     try:
-        print('')
         print(f"-- Check for changes in working directory")
 
         git_command = BASE_GIT_CMD + ['status', '--porcelain']
@@ -192,7 +184,6 @@ def has_no_changes_in_working_directory():
 
 def has_no_commits_to_push(branch):
     try:
-        print('')
         print(f"-- Check for commits to push")
 
         git_command = BASE_GIT_CMD + ['rev-list', '--right-only', '--count', f"origin/{branch}...{branch}"]
@@ -212,7 +203,6 @@ def has_no_commits_to_push(branch):
 
 def checkout_branch(branch):
     try:
-        print('')
         print(f"-- Checkout '{branch}'")
         git_command = BASE_GIT_CMD + ['checkout', branch, '--progress']
         print(' '.join(git_command))
@@ -226,7 +216,6 @@ def checkout_branch(branch):
 
 def merge_source_branch_to_destination_branch(source_branch, destination_branch):
     try:
-        print('')
         print(f"-- Merge '{source_branch}' to '{destination_branch}'")
         git_command = BASE_GIT_CMD + ['merge', '--no-ff', source_branch]
         print(' '.join(git_command))
@@ -236,7 +225,6 @@ def merge_source_branch_to_destination_branch(source_branch, destination_branch)
 
     except subprocess.CalledProcessError:
         print(f"ERROR: Unable to merge '{source_branch}' to '{destination_branch}'")
-        print('')
         print('-- Attempting to resolve merge conflict')
         git_command = BASE_GIT_CMD + ['checkout', '--theirs', '.']
         print(' '.join(git_command))
@@ -262,7 +250,6 @@ def merge_source_branch_to_destination_branch(source_branch, destination_branch)
 
 def amend_commit(commit_msg):
     try:
-        print('')
         print(f"-- Amend commit")
         # git -c diff.mnemonicprefix=false -c core.quotepath=false --no-optional-locks commit -q --amend -F C:\Users\jlindblom\AppData\Local\Temp\b2urjsuc.i1a
         git_command = BASE_GIT_CMD + ['commit', '-q', '--amend', '-m', commit_msg]
@@ -277,7 +264,6 @@ def amend_commit(commit_msg):
 
 def stage_all_changes():
     try:
-        print('')
         print(f"-- Stage all changes")
         git_command = BASE_GIT_CMD + ['add', '.']
         print(' '.join(git_command))
@@ -291,7 +277,6 @@ def stage_all_changes():
 
 def pull_branch(branch):
     try:
-        print('')
         print(f"-- Pull '{branch}'")
 
         current_branch = get_current_branch()
@@ -324,7 +309,6 @@ def pull_branch(branch):
 
 
 def fetch_and_checkout_and_pull_branch(branch):
-    print("")
     print("-- Detecting current branch")
     current_branch = get_current_branch()
 
@@ -424,7 +408,6 @@ def get_artifact_versions(project):
 
 
 def update_artifact_versions(project):
-    print('')
     print(f"-- Update artifact versions")
     current_branch = get_current_branch()
     project_dir = get_project_dir(project)
@@ -461,7 +444,6 @@ def update_artifact_versions(project):
                 with open(pom_file_path, 'r') as file:
                     content = file.read()
 
-
                 def update_version(x):
                     existing_version = x.group(0)
                     major, minor = map(int, existing_version.split('.'))
@@ -481,14 +463,13 @@ def update_artifact_versions(project):
                 with open(pom_file_path, 'r') as file:
                     content = file.read()
 
-
                 def update_version(x):
                     existing_version = x.group(0)
                     new_version = existing_version.replace('-SNAPSHOT', '')
                     print(f'Replacing version "{existing_version}" with "{new_version}"')
                     return new_version
 
-
+                pattern = r'\d+\.\d+-SNAPSHOT'
                 modified_content = re.sub(pattern, update_version, content)
 
                 with open(pom_file_path, 'w') as file:
@@ -529,13 +510,11 @@ def get_first_artifact_version(project):
 
 def print_successful_and_failed(successful, failed):
     if successful and len(successful) > 0:
-        print('')
         print('-----------------')
         print('Successful')
         print('-----------------')
         print('\n'.join(successful))
     if failed and len(failed) > 0:
-        print('')
         print('-----------------')
         print('Failed')
         print('-----------------')
