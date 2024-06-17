@@ -19,9 +19,11 @@ BASE_GIT_CMD = [
 parser = argparse.ArgumentParser(description='Configuration parameters.')
 parser.add_argument('--poms', action='store_true', help='Include to output POM file locations.')
 parser.add_argument('--skipversion', action='store_true', help='Skip the version update step of a script.')
+parser.add_argument('--unpulled', action='store_true', help='Count the number of unpulled commits.')
 args = parser.parse_args()
 output_poms = args.poms
 skipversion = args.skipversion
+unpulled = args.unpulled
 
 
 def is_git_installed():
@@ -112,31 +114,68 @@ def get_latest_commit_date():
     return formatted_date
 
 
-def print_version_status():
+def print_version_status(exclude_hints_and_notes=False):
     table = PrettyTable()
-    fields = ["Artifact Id", "Version", "Branch", "Latest Commit"]
+    fields = [
+        "Artifact Id",
+        "Version",
+        "Uncomm'd",
+        "Unpushed"]
+
+    if unpulled:
+        fields += ["Unpulled"]
+
+    fields += [
+        "Branch",
+        "Latest Commit"]
+
     if output_poms:
         fields.append("POM")
 
     table.field_names = fields
     table.align = "l"
 
+    project_index = 1
+    num_projects = len(projects)
+
     for project in projects:
+        print(f'[{project_index}/{num_projects}] Retrieving meta for "{project}"')
+        project_index += 1
         change_dir_to_project(project, quiet=True)
-        artifact_versions = get_artifact_versions(project)
+        project_git_meta = get_project_git_meta(project)
 
         index = 0
 
-        for (artifact_id, artifact_version, current_branch, latest_commit_date, pom) in artifact_versions:
+        for (artifact_id,
+             artifact_version,
+             num_committed_changes,
+             num_unpushed_commits,
+             num_unpulled_commits,
+             current_branch,
+             latest_commit_date,
+             pom) in project_git_meta:
+
             index += 1
 
-            divider = not index < len(artifact_versions)
+            divider = not index < len(project_git_meta)
 
             if not index == 1:
                 latest_commit_date = ''
                 current_branch = ''
 
-            row = [artifact_id, artifact_version, current_branch, latest_commit_date]
+            row = [
+                artifact_id,
+                artifact_version,
+                num_committed_changes,
+                num_unpushed_commits]
+
+            if unpulled:
+                row += [num_unpulled_commits]
+
+            row += [
+                current_branch,
+                latest_commit_date]
+
             if output_poms:
                 row.append(pom)
 
@@ -144,8 +183,16 @@ def print_version_status():
 
     print(table)
 
-    if not output_poms:
-        print('HINT: Provide "--poms" as an argument to print the POM directories. ')
+    if not exclude_hints_and_notes:
+        if not output_poms:
+            print('HINT: Provide "--poms" as an argument to print the POM directories. ')
+
+        if not unpulled:
+            print('HINT: Provide "--unpulled" as an argument to print the number of unpulled commits. (Note: very slow, ~4s per project)')
+
+        print('NOTE: If script exits prematurely, run from terminal or try having "Run with Python Console" checked in run config.')
+
+    print('')
 
 
 def fetch_branch(branch):
@@ -159,6 +206,69 @@ def fetch_branch(branch):
     except subprocess.CalledProcessError:
         print(f"ERROR: Unable to fetch '{branch}'")
         return False
+
+
+def count_unpulled_commits(branch=get_current_branch()):
+    try:
+        # Fetch updates from the remote repository
+        git_fetch_command = BASE_GIT_CMD + ['fetch']
+        subprocess.run(git_fetch_command, check=True)
+
+        # Get the number of unpulled commits
+        git_count_command = BASE_GIT_CMD + ['rev-list', '--count', f'{branch}..origin/{branch}']
+        unpulled_commits = subprocess.check_output(git_count_command, text=True).strip()
+
+        return unpulled_commits
+    except Exception as e:
+        print(f"ERROR: {e}")
+        return "ERR"
+
+
+def count_uncommitted_changes():
+    try:
+        # Get the list of uncommitted changes
+        git_command = BASE_GIT_CMD + ['status', '--porcelain']
+        result = subprocess.run(git_command, capture_output=True, text=True)
+
+        # Check for errors
+        if result.returncode != 0:
+            print("Error running git status.")
+            return "ERR"
+
+        # Split the output into lines
+        changes = result.stdout.splitlines()
+
+        # Count the number of changes
+        num_changes = len(changes)
+
+        return num_changes
+    except Exception as e:
+        print(f"ERROR: {e}")
+        return "ERR"
+
+
+def count_unpushed_commits():
+    try:
+        # Get the list of unpushed commits
+        git_command = BASE_GIT_CMD + ['log', '--oneline', '@{u}..HEAD']
+        result = subprocess.run(git_command, capture_output=True, text=True)
+
+        # Check for errors
+        if result.returncode != 0:
+            print("Error running git log. Make sure your branch is tracking a remote branch.")
+            return "ERR"
+
+        # Split the output into lines
+        commits = result.stdout.splitlines()
+
+        # Count the number of commits
+        num_commits = len(commits)
+
+        return num_commits
+
+    except subprocess.CalledProcessError as e:
+        print(f"ERROR: {e}")
+        return "ERR"
 
 
 def has_no_changes_in_working_directory():
@@ -184,7 +294,7 @@ def has_no_changes_in_working_directory():
 
 def has_no_commits_to_push(branch):
     try:
-        print(f"-- Check for commits to push")
+        print(f"-- Check for unpushed commits for '{branch}'")
 
         git_command = BASE_GIT_CMD + ['rev-list', '--right-only', '--count', f"origin/{branch}...{branch}"]
         print(' '.join(git_command))
@@ -199,14 +309,34 @@ def has_no_commits_to_push(branch):
         return True
     except Exception as e:
         print(f"ERROR: {e}")
+        return False
 
 
 def checkout_branch(branch):
     try:
         print(f"-- Checkout '{branch}'")
-        git_command = BASE_GIT_CMD + ['checkout', branch, '--progress']
-        print(' '.join(git_command))
-        output = subprocess.check_output(git_command).decode('utf-8').strip()
+        git_command_checkout = BASE_GIT_CMD + ['checkout', branch, '--progress']
+        print(' '.join(git_command_checkout))
+        output = subprocess.check_output(git_command_checkout).decode('utf-8').strip()
+        if "fatal" in output:
+            print(f"ERROR: Unable to checkout '{branch}'")
+            return False
+
+        # Check if the upstream is already set
+        git_command_rev_parse = BASE_GIT_CMD + ['rev-parse', '--abbrev-ref', branch + '@{u}']
+        print(' '.join(git_command_rev_parse))
+        result = subprocess.run(git_command_rev_parse, capture_output=True, text=True)
+
+        if result.returncode == 0:
+            print(f"'{branch}' is tracking '{result.stdout.strip()}'")
+            return True
+
+        print(f"'{branch}' is not tracking a remote branch, updating to track 'origin/{branch}'")
+
+        # Ensure the local branch tracks the origin branch
+        git_command_set_upstream = BASE_GIT_CMD + ['branch', '--set-upstream-to=origin/' + branch, branch]
+        print(' '.join(git_command_set_upstream))
+        output = subprocess.check_output(git_command_set_upstream).decode('utf-8').strip()
         return "fatal" not in output
 
     except subprocess.CalledProcessError:
@@ -251,7 +381,6 @@ def merge_source_branch_to_destination_branch(source_branch, destination_branch)
 def amend_commit(commit_msg):
     try:
         print(f"-- Amend commit")
-        # git -c diff.mnemonicprefix=false -c core.quotepath=false --no-optional-locks commit -q --amend -F C:\Users\jlindblom\AppData\Local\Temp\b2urjsuc.i1a
         git_command = BASE_GIT_CMD + ['commit', '-q', '--amend', '-m', commit_msg]
         print(' '.join(git_command))
         output = subprocess.check_output(git_command).decode('utf-8').strip()
@@ -343,10 +472,19 @@ def find_pom_files(directory):
     return pom_files
 
 
-def get_artifact_versions(project):
-    current_branch = get_current_branch()
+def get_project_git_meta(project):
+    # current_timestamp_seconds_initial = time.time()
     project_dir = get_project_dir(project)
     pom_files = find_pom_files(project_dir)
+    num_uncomitted_changes = str(count_uncommitted_changes())
+    num_unpushed_commits = str(count_unpushed_commits())
+    current_branch = get_current_branch()
+
+    num_unpulled_commits = ''
+    if unpulled:
+        num_unpulled_commits = str(count_unpulled_commits(current_branch))
+
+    latest_commit_date = get_latest_commit_date()
 
     artifact_versions = []
 
@@ -359,8 +497,6 @@ def get_artifact_versions(project):
 
     first = True
     for pom_file_path in pom_files:
-        latest_commit_date = get_latest_commit_date()
-
         version_tag_text = 'N/A'
         artifact_id_text = None
 
@@ -393,17 +529,28 @@ def get_artifact_versions(project):
             artifact_id_text = project
 
         if not first:
+            num_uncomitted_changes = ''
+            num_unpushed_commits = ''
+            num_unpulled_commits = ''
             current_branch = ''
         else:
-            current_branch = current_branch if len(current_branch) <= 9 else current_branch[:9] + '...'
+            current_branch = current_branch if len(current_branch) <= 18 else current_branch[:18] + '...'
 
         if pom_file_path is not None:
             pom_file_path = strip_project_dir(pom_file_path)
 
         artifact_versions.append(
-            (artifact_id_text, version_tag_text, current_branch, latest_commit_date, pom_file_path))
+            (artifact_id_text,
+             version_tag_text,
+             num_uncomitted_changes,
+             num_unpushed_commits,
+             num_unpulled_commits,
+             current_branch,
+             latest_commit_date,
+             pom_file_path))
         first = False
 
+    # print(f'Done. [{round(time.time() - current_timestamp_seconds_initial, 2)}s]')
     return artifact_versions
 
 
@@ -520,4 +667,5 @@ def print_successful_and_failed(successful, failed):
         print('-----------------')
         print('\n'.join(failed))
     print('-----------------')
-    print_version_status()
+    print_version_status(exclude_hints_and_notes=True)
+    print('DONE.')

@@ -1,4 +1,7 @@
-from git_base import amend_commit, change_dir_to_project, fetch_and_checkout_and_pull_branch, get_first_artifact_version, has_no_changes_in_working_directory, has_no_commits_to_push, init, merge_source_branch_to_destination_branch, print_successful_and_failed, projects, skipversion, stage_all_changes, update_artifact_versions
+from git_base import amend_commit, change_dir_to_project, count_uncommitted_changes, count_unpulled_commits, \
+    count_unpushed_commits, fetch_and_checkout_and_pull_branch, get_first_artifact_version, \
+    has_no_changes_in_working_directory, has_no_commits_to_push, init, merge_source_branch_to_destination_branch, \
+    print_successful_and_failed, projects, skipversion, stage_all_changes, update_artifact_versions
 
 if not init('GIT Merge'):
     exit(1)
@@ -9,6 +12,24 @@ if not skipversion:
 else:
     print('[--skipversion Detected]: Will skip POM version updates.')
     print('')
+
+for project in projects:
+    change_dir_to_project(project, True)
+
+    if count_uncommitted_changes():
+        print(f'ERROR: Changes detected in working directory for project: "{project}"')
+        print('Stash or revert changes and try again.')
+        exit(0)
+
+    if count_unpushed_commits():
+        print(f'ERROR: Unpushed commits detected in current branch for project: "{project}"')
+        print('Clean up current branch and try again.')
+        exit(0)
+
+    if count_unpulled_commits():
+        print(f'ERROR: Unpulled commits detected in current branch for project: "{project}"')
+        print('Clean up current branch and try again.')
+        exit(0)
 
 continue_answer = input("Do you want to continue? (Y/N) ").strip().upper()
 if continue_answer != 'Y':
@@ -37,6 +58,18 @@ for project in projects:
     if not has_no_commits_to_push(destination_branch):
         failed.append(project)
         continue
+
+if len(failed):
+    print(
+        f'ERROR: The following projects had uncommitted changes or unpushed commits in "{source_branch}" and/or "{destination_branch}".')
+    print('-----------------')
+    print('\n'.join(failed))
+    print('-----------------')
+    print('Clean up projects with errors and try again.')
+    exit(0)
+
+for project in projects:
+    change_dir_to_project(project)
 
     if not fetch_and_checkout_and_pull_branch(source_branch):
         failed.append(project)
